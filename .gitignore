@@ -6,3 +6,4 @@ __pycache__/
 _diag_*.py
 _diag_*.html
 _diag_*.json
+.commitmsg
