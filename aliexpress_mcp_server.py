@@ -3,7 +3,11 @@
 AliExpress MCP Server
 
 Search AliExpress, pull clean product details, check shipping to the
-configured country (default: Canada, prices in CAD), and peek at the cart — all read-only.
+configured country (default: Israel, prices in USD), and peek at the cart — all read-only.
+
+Adapted from justinritchie/aliexpress-mcp-server: IL/USD defaults,
+currency-agnostic price parsing, explicit region cookie, and anonymous
+MTOP token bootstrap so search/details/shipping work without a login.
 
 Auth: Session cookies from MCP Auth Bridge extension at
 ~/.mcp-credentials/aliexpress.json
@@ -29,8 +33,8 @@ CREDENTIALS_PATH = Path(
     os.environ.get("ALIEXPRESS_CREDENTIALS", "~/.mcp-credentials/aliexpress.json")
 ).expanduser()
 
-COUNTRY = os.environ.get("ALIEXPRESS_COUNTRY", "CA")
-CURRENCY = os.environ.get("ALIEXPRESS_CURRENCY", "CAD")
+COUNTRY = os.environ.get("ALIEXPRESS_COUNTRY", "IL")
+CURRENCY = os.environ.get("ALIEXPRESS_CURRENCY", "USD")
 LOCALE = os.environ.get("ALIEXPRESS_LOCALE", "en_US")
 
 # Optional: inject an httpx transport (used by offline tests).
@@ -747,7 +751,7 @@ def search_products(
         query: Search term (e.g., "groudon plush", "usb c cable")
         min_rating: Minimum rating (0-5, e.g., 4.5). 0 disables filter.
             Unrated listings are excluded when this is set.
-        max_price: Maximum price in the configured currency (default CAD). 0 disables filter.
+        max_price: Maximum price in the configured currency (default USD). 0 disables filter.
         sort_by: One of "best_match", "orders", "price_asc", "price_desc"
             (all four verified live).
     """
@@ -1132,7 +1136,7 @@ def get_product_details(item_id: str = "", url: str = "") -> str:
 def get_shipping_estimate(item_id: str) -> str:
     """
     Check shipping time and cost for a product to the configured country
-    (default: Canada; set ALIEXPRESS_COUNTRY to change).
+    (default: Israel; set ALIEXPRESS_COUNTRY to change).
 
     Args:
         item_id: AliExpress item ID (e.g., "1005007655628250")

@@ -3,7 +3,7 @@
     "aliexpress": {
       "command": "/ABSOLUTE/PATH/aliexpress-mcp-server/.venv/bin/python",
       "args": ["/ABSOLUTE/PATH/aliexpress-mcp-server/aliexpress_mcp_server.py"],
-      "env": { "ALIEXPRESS_COUNTRY": "CA", "ALIEXPRESS_CURRENCY": "CAD" }
+      "env": { "ALIEXPRESS_COUNTRY": "IL", "ALIEXPRESS_CURRENCY": "USD" }
     }
   }
 }

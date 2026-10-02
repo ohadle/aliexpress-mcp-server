@@ -1,6 +1,8 @@
 # AliExpress MCP Server
 
-An MCP server that wraps AliExpress search and product detail scraping. Defaults to shipping to Canada with prices in CAD; set `ALIEXPRESS_COUNTRY` / `ALIEXPRESS_CURRENCY` (and optionally `ALIEXPRESS_LOCALE`) for another region.
+An MCP server that wraps AliExpress search and product detail scraping.
+
+**This fork** of [justinritchie/aliexpress-mcp-server](https://github.com/justinritchie/aliexpress-mcp-server) defaults to shipping to Israel with prices in USD; set `ALIEXPRESS_COUNTRY` / `ALIEXPRESS_CURRENCY` (and optionally `ALIEXPRESS_LOCALE`) for another region. Otherwise it tracks upstream.
 
 Search, product details and shipping work without logging in; only `view_cart` needs session cookies. Run the offline tests with `pytest tests`, or `python smoke_test.py` for a live check.
 
