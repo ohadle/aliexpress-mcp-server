@@ -745,7 +745,8 @@ def search_products(
     sort_by: str = "best_match",
 ) -> str:
     """
-    Search AliExpress for products.
+    Search AliExpress for products. Prices shown are the cheapest variant
+    ("from" prices); use get_product_details for each variant's price.
 
     Args:
         query: Search term (e.g., "groudon plush", "usb c cable")
@@ -793,7 +794,10 @@ def search_products(
             suffix = f" with {', '.join(filters)}" if filters else ""
             return f"No products found for '{query}'{suffix}."
 
-        lines = [f"Found {len(products)} result(s) for '{query}' (sort: {sort_by}):"]
+        lines = [
+            f"Found {len(products)} result(s) for '{query}' (sort: {sort_by}). "
+            "Prices are for the cheapest variant; get_product_details lists every variant's price."
+        ]
         for p in products[:25]:
             line = f"- {p['title']}"
             if p["price"] is not None:
@@ -852,6 +856,77 @@ def _fetch_pdp_mtop(item_id: str) -> Optional[dict]:
     return None
 
 
+def _extract_variants(result: dict) -> list[dict]:
+    """
+    Build one entry per SKU with its option names and price.
+
+    Live shape (Oct 2026):
+      SKU.skuProperties[]  {skuPropertyName: "Color", skuPropertyValues: [
+                              {propertyValueIdLong: 193, propertyValueDisplayName: "100W Metal Grey"}]}
+      SKU.skuPaths[]       {skuIdStr, path: "14:193;200001036:201441933", salable, skuStock,
+                            skuAttr: "14:193#100W Metal Grey;…"}  (#… = seller's custom name)
+      PRICE.skuPriceInfoMap[skuIdStr]  {salePriceString: "$6.08", originalPrice: {value: 6.62}}
+
+    Properties with a single value (e.g. "Ships From: China Mainland" on most
+    listings) are left out of the options since they don't distinguish variants.
+    """
+    sku = result.get("SKU") or {}
+    price_map = (result.get("PRICE") or {}).get("skuPriceInfoMap") or {}
+    props = sku.get("skuProperties") or []
+    paths = sku.get("skuPaths") or []
+    if not isinstance(props, list) or not isinstance(paths, list):
+        return []
+
+    names: dict[str, str] = {}
+    values: dict[tuple[str, str], str] = {}
+    multi: set[str] = set()
+    for p in props:
+        if not isinstance(p, dict):
+            continue
+        pid = str(p.get("skuPropertyId"))
+        names[pid] = p.get("skuPropertyName") or pid
+        vals = p.get("skuPropertyValues") or []
+        if len(vals) > 1:
+            multi.add(pid)
+        for v in vals:
+            if isinstance(v, dict):
+                values[(pid, str(v.get("propertyValueIdLong") or v.get("propertyValueId")))] = (
+                    v.get("propertyValueDisplayName") or v.get("propertyValueName") or "?"
+                )
+
+    variants = []
+    for sp in paths:
+        if not isinstance(sp, dict):
+            continue
+        sku_id = str(sp.get("skuIdStr") or sp.get("skuId"))
+        custom = {}
+        for part in (sp.get("skuAttr") or "").split(";"):
+            if "#" in part:
+                key, _, label = part.partition("#")
+                custom[key] = label
+        options = {}
+        for part in (sp.get("path") or "").split(";"):
+            pid, _, vid = part.partition(":")
+            if pid in multi:
+                options[names[pid]] = custom.get(part) or values.get((pid, vid), vid)
+        info = price_map.get(sku_id) or {}
+        price = parse_price(info["salePriceString"]) if isinstance(info.get("salePriceString"), str) else None
+        op = info.get("originalPrice")
+        orig = op.get("value") if isinstance(op, dict) and isinstance(op.get("value"), (int, float)) else None
+        variants.append({
+            "sku_id": sku_id,
+            "options": options,
+            "price": price,
+            "original_price": float(orig) if orig is not None else None,
+            "salable": bool(sp.get("salable")),
+            "stock": sp.get("skuStock"),
+        })
+    # Single-SKU listings have nothing to choose between.
+    if len(variants) < 2:
+        return []
+    return variants
+
+
 def _extract_pdp_fields(mtop_resp: dict, item_id: str) -> dict:
     """
     Pull fields we care about from an MTOP PDP response.
@@ -881,6 +956,7 @@ def _extract_pdp_fields(mtop_resp: dict, item_id: str) -> dict:
         "ship_days_min": None,
         "ship_days_max": None,
         "image_url": None,
+        "variants": [],
     }
 
     result = mtop_resp.get("data", {}).get("result", {})
@@ -952,6 +1028,8 @@ def _extract_pdp_fields(mtop_resp: dict, item_id: str) -> dict:
 
     if d["discount_pct"] is None and d["price"] and d["original_price"] and d["original_price"] > d["price"]:
         d["discount_pct"] = round((1 - d["price"] / d["original_price"]) * 100)
+
+    d["variants"] = _extract_variants(result)
 
     # ── Rating / sold count ────────────────────────────────────────────
     rating_mod = result.get("PC_RATING")
@@ -1047,13 +1125,16 @@ def _extract_pdp_fields(mtop_resp: dict, item_id: str) -> dict:
 
 
 @mcp.tool()
-def get_product_details(item_id: str = "", url: str = "") -> str:
+def get_product_details(item_id: str = "", url: str = "", variant: str = "") -> str:
     """
-    Get detailed info for a specific AliExpress product.
+    Get detailed info for a specific AliExpress product, including every
+    variant (color/size/etc.) with its own price, cheapest first.
 
     Args:
         item_id: AliExpress item ID (e.g., "1005007655628250")
         url: Full product URL (alternative to item_id)
+        variant: Optional filter on variant names; every word must match,
+            case-insensitive (e.g., "metal grey 2m").
     """
     if not item_id and url:
         m = ITEM_ID_RE.search(url)
@@ -1139,7 +1220,47 @@ def get_product_details(item_id: str = "", url: str = "") -> str:
         lines.append(eta_line)
     if d.get("ship_from"):
         lines.append(f"Ships from: {d['ship_from']}")
+    if d.get("variants"):
+        lines.append("")
+        lines.extend(_format_variants(d["variants"], variant))
     return "\n".join(lines)
+
+
+MAX_VARIANT_LINES = 60
+
+
+def _format_variants(variants: list[dict], query: str = "") -> list[str]:
+    words = query.lower().split()
+
+    def label(v: dict) -> str:
+        return " / ".join(f"{k}: {val}" for k, val in v["options"].items()) or v["sku_id"]
+
+    matched = [v for v in variants if all(w in label(v).lower() for w in words)]
+    available = sorted(
+        (v for v in matched if v["salable"] and v["price"] is not None), key=lambda v: v["price"]
+    )
+    unavailable = [v for v in matched if v not in available]
+
+    header = f"Variants ({len(available)} available"
+    header += f" of {len(matched)} matching '{query}')" if words else f" of {len(variants)})"
+    if not matched:
+        return [header, "- none; drop or change the variant filter"]
+    out = [header + ", cheapest first:"]
+    for v in available[:MAX_VARIANT_LINES]:
+        line = f"- {label(v)} — {fmt_money(v['price'])}"
+        if v["original_price"] and v["original_price"] > v["price"]:
+            line += f" (was {fmt_money(v['original_price'])})"
+        if isinstance(v["stock"], int) and v["stock"] <= 10:
+            line += f" · only {v['stock']} left"
+        out.append(line)
+    if len(available) > MAX_VARIANT_LINES:
+        out.append(f"- … {len(available) - MAX_VARIANT_LINES} more; pass `variant` to narrow down")
+    if unavailable:
+        # Unavailable SKUs often carry placeholder prices, so don't show them.
+        names = "; ".join(label(v) for v in unavailable[:10])
+        more = f" (+{len(unavailable) - 10} more)" if len(unavailable) > 10 else ""
+        out.append(f"Unavailable: {names}{more}")
+    return out
 
 
 @mcp.tool()

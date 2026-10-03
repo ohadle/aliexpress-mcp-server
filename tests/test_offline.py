@@ -129,3 +129,49 @@ def test_cart_includes_invalid_items():
     assert not cart["shops"]
     [it] = cart["items"]
     assert it["item_id"] == "4001022126797" and it["invalid_text"].startswith("Item not deliverable")
+
+# SKU/PRICE shape captured live from the same PDP (Oct 2026), trimmed to 3 SKUs.
+LIVE_SKUS = {"data": {"result": {
+    "PRODUCT_TITLE": {"text": "UGREEN cable"},
+    "PRICE": {"targetSkuPriceInfo": {"salePriceString": "$6.08"}, "skuPriceInfoMap": {
+        "12000060711102454": {"originalPrice": {"currency": "USD", "formatedAmount": "$6.62", "value": 6.62},
+                              "salePriceString": "$6.08"},
+        "12000060711102455": {"originalPrice": {"value": 7.42}, "salePriceString": "$6.82"},
+        "12000060711102470": {"salePriceString": "$149,799.85"}}},
+    "SKU": {"skuProperties": [
+        {"skuPropertyId": 200007763, "skuPropertyName": "Ships From", "skuPropertyValues": [
+            {"propertyValueDisplayName": "China Mainland", "propertyValueIdLong": 201336100}]},
+        {"skuPropertyId": 14, "skuPropertyName": "Color", "skuPropertyValues": [
+            {"propertyValueDisplayName": "100W Metal Grey", "propertyValueIdLong": 193, "propertyValueName": "black"},
+            {"propertyValueDisplayName": "100W Metal Blue", "propertyValueIdLong": 173}]},
+        {"skuPropertyId": 200001036, "skuPropertyName": "Length", "skuPropertyValues": [
+            {"propertyValueDisplayName": "0.5m", "propertyValueIdLong": 201441933},
+            {"propertyValueDisplayName": "1m", "propertyValueIdLong": 200746126}]}],
+        "skuPaths": [
+            {"path": "14:193;200001036:201441933;200007763:201336100", "salable": True, "skuStock": 45,
+             "skuAttr": "200007763:201336100;14:193#Seller Grey;200001036:201441933#0.5m",
+             "skuIdStr": "12000060711102454"},
+            {"path": "14:193;200001036:200746126;200007763:201336100", "salable": True, "skuStock": 3,
+             "skuIdStr": "12000060711102455"},
+            {"path": "14:173;200001036:201441933;200007763:201336100", "salable": False, "skuStock": 0,
+             "skuIdStr": "12000060711102470"}]},
+}}}
+
+def test_variants_extracted_with_names_and_prices():
+    v = m._extract_pdp_fields(LIVE_SKUS, "1")["variants"]
+    assert [x["options"] for x in v] == [
+        {"Color": "Seller Grey", "Length": "0.5m"},          # seller's custom name wins
+        {"Color": "100W Metal Grey", "Length": "1m"},        # single-valued "Ships From" dropped
+        {"Color": "100W Metal Blue", "Length": "0.5m"}]
+    assert (v[0]["price"], v[0]["original_price"], v[1]["price"]) == (6.08, 6.62, 6.82)
+    assert not v[2]["salable"]
+
+def test_variants_rendered(monkeypatch):
+    monkeypatch.setattr(m, "_fetch_pdp_mtop", lambda i: LIVE_SKUS)
+    out = m.get_product_details(item_id="1")
+    assert "Variants (2 available of 3), cheapest first:" in out
+    assert "- Color: Seller Grey / Length: 0.5m — 6.08 USD (was 6.62 USD)" in out
+    assert "Length: 1m — 6.82 USD (was 7.42 USD) · only 3 left" in out
+    assert "Unavailable: Color: 100W Metal Blue / Length: 0.5m" in out and "149,799" not in out
+    out = m.get_product_details(item_id="1", variant="GREY 1m")
+    assert "1 available of 1 matching" in out and "0.5m" not in out

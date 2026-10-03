@@ -10,8 +10,8 @@ It is read-only by design. It does **not** add to cart, check out, or pay.
 
 | Tool | Needs login? | What it does |
 |------|--------------|--------------|
-| `search_products(query, min_rating, max_price, sort_by)` | No | Search AliExpress. Sort by `best_match`, `orders`, `price_asc` or `price_desc`, and filter by rating or price. |
-| `get_product_details(item_id or url)` | No | Title, price and discount, rating, sold count, seller, shipping cost and delivery estimate. |
+| `search_products(query, min_rating, max_price, sort_by)` | No | Search AliExpress. Sort by `best_match`, `orders`, `price_asc` or `price_desc`, and filter by rating or price. Prices are for the cheapest variant. |
+| `get_product_details(item_id or url, variant)` | No | Title, price and discount, rating, sold count, seller, shipping cost and delivery estimate, plus every variant (color, size, etc.) with its own price, cheapest first. `variant` filters the variants by name, e.g. `"black 2m"`. |
 | `get_shipping_estimate(item_id)` | No | Shipping cost and delivery estimate to your country. |
 | `view_cart()` | **Yes** | What's in your AliExpress cart. Needs the Chrome extension ([Cart access](#cart-access-optional-chrome-extension)). |
 
