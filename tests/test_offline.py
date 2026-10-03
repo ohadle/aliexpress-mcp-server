@@ -107,3 +107,25 @@ def test_pdp_live_shape():
     assert d["price_range"] == (4.62, 8.76) and d["original_price"] == 4.98
     assert d["shipping_cost"] == 1.99 and (d["ship_days_min"], d["ship_days_max"]) == (6, 12)
     assert d["seller_positive_rate"] == 98.5 and d["review_count"] == 5755
+
+def test_price_range_ignores_unsalable_placeholder_skus():
+    def sku(p): return {"salePriceString": f"${p}"}
+    resp = {"data": {"result": {
+        "PRICE": {"targetSkuPriceInfo": {"salePriceString": "$2.31"},
+                  "skuPriceInfoMap": {"1": sku("2.31"), "2": sku("2.98"), "3": sku("149,799.85")}},
+        "SKU": {"skuPaths": [{"skuIdStr": "1", "salable": True}, {"skuIdStr": "2", "salable": True},
+                             {"skuIdStr": "3", "salable": False}]},
+    }}}
+    assert m._extract_pdp_fields(resp, "1")["price_range"] == (2.31, 2.98)
+
+def test_cart_includes_invalid_items():
+    resp = {"data": {"data": {
+        "invalid_store_title_component_x": {"tag": "invalid_store_title_component", "fields": {"title": "Unavailable"}},
+        "invalid_product_item_component_y": {"tag": "invalid_product_item_component", "fields": {
+            "itemId": 4001022126797, "title": "Sunglasses", "valid": False,
+            "invalidText": "Item not deliverable to the selected address"}},
+    }}}
+    cart = m._extract_cart(resp)
+    assert not cart["shops"]
+    [it] = cart["items"]
+    assert it["item_id"] == "4001022126797" and it["invalid_text"].startswith("Item not deliverable")

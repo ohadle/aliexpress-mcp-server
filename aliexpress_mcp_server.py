@@ -923,8 +923,18 @@ def _extract_pdp_fields(mtop_resp: dict, item_id: str) -> dict:
                     d["original_price"] = parse_price(op["formatedAmount"])
 
         # If this is a variant listing, compute a price range from skuPriceInfoMap
+        # Sellers park disabled variants at absurd placeholder prices (e.g.
+        # $149,799.85), so only count SKUs that SKU.skuPaths marks salable.
         sku_map = pn.get("skuPriceInfoMap")
         if isinstance(sku_map, dict) and sku_map:
+            paths = (result.get("SKU") or {}).get("skuPaths") or []
+            salable = {
+                str(p.get("skuIdStr") or p.get("skuId"))
+                for p in paths
+                if isinstance(p, dict) and p.get("salable")
+            }
+            if salable:
+                sku_map = {k: v for k, v in sku_map.items() if k in salable}
             prices = []
             for sku in sku_map.values():
                 if isinstance(sku, dict):
@@ -1192,6 +1202,7 @@ def _extract_cart(render_response: dict) -> dict:
     We recognize these tags:
 
         product_item_component  → a cart line
+        invalid_product_item_component → an unavailable line (invalidText says why)
         store_title_component   → seller/shop heading
         summary_component       → totals / checkout summary
         cart_header_component   → the top bar (contains `count`)
@@ -1229,7 +1240,7 @@ def _extract_cart(render_response: dict) -> dict:
                 except (TypeError, ValueError):
                     pass
 
-        elif tag.startswith("store_title_component"):
+        elif tag.startswith("store_title_component") and "invalid" not in tag:
             sid = fields.get("sellerId") or fields.get("shopId")
             url = fields.get("url") or ""
             if isinstance(url, str) and url.startswith("//"):
@@ -1241,7 +1252,7 @@ def _extract_cart(render_response: dict) -> dict:
                 "seller_id": sid,
             }
 
-        elif tag.startswith("product_item_component"):
+        elif tag.startswith(("product_item_component", "invalid_product_item_component")):
             item_id = fields.get("itemId") or fields.get("productId")
             title = fields.get("title")
             if not item_id or not title:
@@ -1255,6 +1266,7 @@ def _extract_cart(render_response: dict) -> dict:
                 "image_url": fields.get("img"),
                 "url": f"{BASE_URL}/item/{item_id}.html",
                 "valid": fields.get("valid", True),
+                "invalid_text": fields.get("invalidText"),
                 "status": fields.get("status"),
                 "cart_id": fields.get("cartId"),
             }
@@ -1443,7 +1455,7 @@ def view_cart() -> str:
         if it.get("delivery_date"):
             line += f"\n  delivery: {it['delivery_date']}"
         if not it.get("valid", True):
-            line += "\n  ⚠️ invalid (sold out or removed)"
+            line += f"\n  ⚠️ unavailable: {it.get('invalid_text') or 'sold out or removed'}"
         line += f"\n  item_id: {it['item_id']}"
         lines.append(line)
 
